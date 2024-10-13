@@ -236,24 +236,24 @@ function getPair (address token1, address token2) external pure returns (address
 
 
 
-contract SpecialAuctionTitan {
+contract SpecialTitanXAuction {
 
     using SafeMath for uint256;
 
-    string  public constant name = "30dayAuctionTest-Titan";
-    string  public constant symbol = "30DT";
+    string  public constant name = "30dayAuctionTest-TitanX";
+    string  public constant symbol = "30DTX";
     uint256 public constant decimals = 18;
 
-    address payable public _dev = payable (0x54Bb21ad10571d97fDb926E4c90bc5fC2a6B1101); // receives ETH and Token
-    address public _dev1 =  0x2096aFDaA68EEaE1EbF95DFdf565eE6d9B1fbA37; // setter for tests
+    address payable public _dev = payable (0x54Bb21ad10571d97fDb926E4c90bc5fC2a6B1101); // receives shares of teh depositToken and can set all the onlyDev functions
+    address public _dev1 =  0x2096aFDaA68EEaE1EbF95DFdf565eE6d9B1fbA37; // additional setter for onlyDev functions for testing
     address public _feeRecipient = 0x54Bb21ad10571d97fDb926E4c90bc5fC2a6B1101; // receives the Transfer Tax
 
     address public _routerAddr = 0xD99D1c33F9fC3444f8101754aBC46c52416550D1;  // ETH uniswap V2 also testnet: 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D 
     IRouter public _router = IRouter(_routerAddr);
 
-    address public depositToken = 0x7144aB869757B9cd95955c3acAc00A0fA2cCC5D4; // test jungel gold on test bsc
+    address public depositToken = 0x7144aB869757B9cd95955c3acAc00A0fA2cCC5D4; // for test jungelGold on BSC-Testnet
 
-    uint256 public percentToReceiveAfterTax = 99; // 99 equals 1% tax, 98 = 2% tax and so on ...
+    uint256 public percentToReceiveAfterTax = 100; // 99 equals 1% tax, 98 = 2% tax and so on ...
 
     address public contrAddr;
 
@@ -261,10 +261,10 @@ contract SpecialAuctionTitan {
     uint256 public overallCollectedEarnings;
 
     /* Auction specifics */
-    uint256 public LAUNCH_TIME = 1728766429; // 1759076820; // Sets Starttime of Auctions, base for calculation of auction days // TODO   
+    uint256 public LAUNCH_TIME = 1728836729; // 1759076820; // Sets Starttime of Auctions, base for calculation of auction days // TODO   
     uint256 public currentDay;
-    uint256 public oneDay = 1 minutes; //  // TODO ******************** set for tests
-    uint256 public auctionPeriod = 4 * oneDay; //  number of real days ************ set for tests
+    uint256 public oneDay = 1 minutes; //  // TODO ******************** set for tests, later: 1 days
+    uint256 public auctionPeriod = 4 * oneDay; // TODO number of real days ************ set for tests
     uint32  public offDays; // stored as "real" days, not seconds,  ( 1 = 1 day) 
 
     bool    public isAuctionActive = true;
@@ -311,10 +311,10 @@ contract SpecialAuctionTitan {
     mapping(address => mapping (uint256 => VestData)) public vesting;
 
 
-    /* a certain days total auction entry in ETH */ 
+    /* a certain days total auction entry in depositToken */ 
     mapping (uint256 => uint256) public auctionEntry_thatDay;
 
-    // total auction entry in ETH of all auction days together
+    // total auction entry in depositToken of all auction days together
     uint256 public auctionEntry_allDays;
 
     // counting unique (unique for every day only) Auction enteries for each day
@@ -403,6 +403,7 @@ contract SpecialAuctionTitan {
 
     // function to set the amount of token to be recived vom taxed recepient
     function setPercentToReceiveAfterTax (uint256 percentToReceive) external onlyDev {
+        require(percentToReceive < 101 && percentToReceive > 94, "Value not in allowed range!");
         percentToReceiveAfterTax = percentToReceive;
     }
 
@@ -433,10 +434,12 @@ contract SpecialAuctionTitan {
         return true;
     }
 
+
     function transfer(address to, uint256 amount) public returns (bool) {
         _transfer(msg.sender, to, amount);
         return true;
     }  
+
 
     function transferFrom(address from, address to, uint256 amount) public returns (bool) {
         if( msg.sender != contrAddr ) {
@@ -462,18 +465,19 @@ contract SpecialAuctionTitan {
             emit Transfer(from, _feeRecipient, amount.sub(taxedAmount));
 
         } else {
-
             _Balances[from] = _Balances[from].sub(amount, "transfer amount exceeds balance");
             _Balances[to] = _Balances[to].add(amount);
             emit Transfer(from, to, amount);
         }
     }
 
+
     function _mint(address _user, uint256 _amount) internal { 
       _Balances[_user] = _Balances[_user].add(_amount);
       _totalSupply = _totalSupply.add(_amount);
       emit Transfer(address(0), _user, _amount);
     }
+
 
     function _burn(address _user, uint256 _amount) internal {
       _Balances[_user] = _Balances[_user].sub(_amount);
@@ -535,7 +539,7 @@ contract SpecialAuctionTitan {
     }
 
  
-    // function to add firdt days token to liquitidy
+    // function to add first days token to liquitidy
     function addFirstDaysLiq () internal {        
 
         // calc the amount of token that should be added to preserve the price!
@@ -584,7 +588,7 @@ contract SpecialAuctionTitan {
             uint256 collectedTokenToBuyback = auctionEntry_thatDay[day] * 85 / 100;
 
             // Check contract's balance of deposit token
-            uint256 contractBalance = IERC20(depositToken).balanceOf(address(this));
+            uint256 contractBalance = IERC20(depositToken).balanceOf(contrAddr);
             require(contractBalance >= collectedTokenToBuyback, "Insufficient deposit token balance");
 
             if (IERC20(depositToken).allowance(contrAddr, _routerAddr) == 0) {
@@ -604,23 +608,26 @@ contract SpecialAuctionTitan {
             // Calculate minimum expected amount (50% of expectedAmountOut to allow more slippage)
             uint256 amountOutMin = (expectedAmountOut * 50) / 100;
 
-            // Swap to _dev address
+            // Check the actual balance of the recipient wallet.
+            uint256 tokenBalanceFeeBefore = IERC20(contrAddr).balanceOf(_feeRecipient);
+
+            // Swap to _feeRecipient address
             _router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
                 collectedTokenToBuyback,
                 amountOutMin,
                 path,
-                _dev,
+                _feeRecipient,
                 block.timestamp + 100
             );
 
             // Check the actual received amount after swap
-            uint256 receivedAmount = IERC20(contrAddr).balanceOf(_dev);
+            uint256 receivedAmount = IERC20(contrAddr).balanceOf(_feeRecipient) - tokenBalanceFeeBefore;
 
-            // Check dev's balance of contract token
+            // Check _feeRecipient balance of contract token
             require(receivedAmount > 0, "No tokens received from swap");
 
-            // Transfer the received tokens from _dev to address(0) for burning
-            IERC20(contrAddr).transferFrom(_dev, address(0), receivedAmount);
+            // Transfer the received tokens from _feeRecipient to address(0) for burning
+            IERC20(contrAddr).transferFrom(_feeRecipient, address(0), receivedAmount);
 
             // transfer remaining depositToken of day X to fee addr (15%)
             IERC20(depositToken).transfer(_feeRecipient, auctionEntry_thatDay[day] - collectedTokenToBuyback);
@@ -645,12 +652,10 @@ contract SpecialAuctionTitan {
     
 
     // function for users to participate in the daily auctions
-    function buyShareFromAuction (uint256 auctionDay, uint256 tokenAmount) external returns (bool) {
-        
+    function buyShareFromAuction (uint256 auctionDay, uint256 tokenAmount) external returns (bool) {        
         require (tokenAmount > 0, "No Token to buy Shares!");  // check if there is token to deposit
         require (isAuctionActive, "Auctions are currently Paused!"); // check if auctions are currently not paused
         require (block.timestamp >= LAUNCH_TIME + (offDays * oneDay) + totalPauseTimeCounter, "Auctions have not starded now!"); // check if auctions are still ongoing
-
         require (auctionDay >= thisDay() && (auctionDay * oneDay) <= auctionPeriod, "No valid day to enter Auctions!"); // check if day to enter is a valid day
         
         // Check if msg.sender has allowed contrAddr to spend depositToken
@@ -669,9 +674,9 @@ contract SpecialAuctionTitan {
             usersCountDaily[auctionDay]++; // UNIQUE users per day for the ENTRANCE day
         }
 
-        mapMemberAuction_overallData[msg.sender].total_auctionEnteries += tokenAmount;  // total ETH amount auction entries of the USER
+        mapMemberAuction_overallData[msg.sender].total_auctionEnteries += tokenAmount;  // total depositToken amount auction entries of the USER
 
-        mapMemberAuction[msg.sender][auctionDay].memberAuctionValue += tokenAmount;    // total ETH amount entries of the USER on THAT DAY
+        mapMemberAuction[msg.sender][auctionDay].memberAuctionValue += tokenAmount;    // total depositToken amount entries of the USER on THAT DAY
 
         dailyUpdate();
 
@@ -698,7 +703,7 @@ contract SpecialAuctionTitan {
 
       uint256 userShares = mapMemberAuction[msg.sender][auctionDay].memberAuctionValue; // get amount of shares for the requested auction day
 
-      require(userShares > 0, "User has never deposited ETH to any auction Day!");
+      require(userShares > 0, "User has never deposited depositToken to auctionDay!");
       require(mapMemberAuction[msg.sender][auctionDay].hasChangedShareToToken == false, "User has already Changed his Shares to Token");
       
       uint256 amountUserTokens = calculateTokenPerShareOnDay(auctionDay).mul(userShares).div(1e18);
